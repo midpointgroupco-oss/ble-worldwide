@@ -271,7 +271,7 @@ function EnrollModal({ onClose, onSaved }) {
     setSaving(true)
     setError('')
 
-    const { error: dbError } = await supabase.from('students').insert([{
+    const { data: insertedStudents, error: dbError } = await supabase.from('students').insert([{
       full_name:      form.full_name,
       email:          form.email,
       grade_level:    form.grade_level,
@@ -280,9 +280,30 @@ function EnrollModal({ onClose, onSaved }) {
       guardian_email: form.guardian_email,
       status:         'active',
       student_id:     'BLE-' + Date.now().toString().slice(-6)
-    }])
+    }]).select()
 
     if (dbError) { setError(dbError.message); setSaving(false); return }
+
+    const newStudentId = insertedStudents?.[0]?.id
+
+    if (form.email) {
+      try {
+        const sRes = await fetch('/.netlify/functions/invite-student', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            student_name:  form.full_name,
+            student_email: form.email,
+            grade_level:   form.grade_level,
+            student_id:    newStudentId,
+          })
+        })
+        const sData = await sRes.json()
+        if (!sData.success) console.warn('Student invite issue:', sData.error)
+      } catch (e) {
+        console.warn('Student invite failed:', e.message)
+      }
+    }
 
     if (form.guardian_email) {
       try {
