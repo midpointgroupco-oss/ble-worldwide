@@ -827,7 +827,7 @@ function HRSalary() {
             {current && (
               <div style={{padding:'12px 16px',background:'rgba(0,201,177,.07)',borderRadius:10,marginBottom:16,border:'1px solid rgba(0,201,177,.2)'}}>
                 <div style={{fontSize:11,fontWeight:800,color:'var(--teal)',textTransform:'uppercase',letterSpacing:1,marginBottom:4}}>Current</div>
-                <div style={{fontSize:24,fontWeight:900,color:'var(--teal)}}>${Number(current.amount).toLocaleString()}</div>
+                <div style={{fontSize:24,fontWeight:900,color:'var(--teal)'}}>${Number(current.amount).toLocaleString()}</div>
                 <div style={{fontSize:12,color:'var(--muted)',marginTop:2,textTransform:'capitalize'}}>{current.salary_type} &middot; {current.pay_frequency} &middot; as of {current.effective_date}</div>
               </div>
             )}
