@@ -35,6 +35,7 @@ import AdminEvaluations from './pages/admin/Evaluations'
 import AdminIncidents from './pages/admin/Incidents'
 import AdminFees from './pages/admin/Fees'
 import AdminHR from './pages/admin/HR'
+import AdminLedger from './pages/admin/Ledger'
 import AdminAlumni from './pages/admin/Alumni'
 import TeacherLessonPlans from './pages/teacher/LessonPlans'
 import SuperAdminDashboard from './pages/admin/SuperAdmin'
@@ -115,6 +116,8 @@ export default function App() {
         <Route path="incidents"    element={<AdminIncidents/>}/>
         <Route path="fees"         element={<AdminFees/>}/>
         <Route path="alumni"       element={<AdminAlumni/>}/>
+        <Route path="hr"           element={<AdminHR/>}/>
+        <Route path="ledger"       element={<AdminLedger/>}/>
         <Route path="ai" element={<Suspense fallback={AI_FB}><AdminAI/></Suspense>}/>
       </Route>
 

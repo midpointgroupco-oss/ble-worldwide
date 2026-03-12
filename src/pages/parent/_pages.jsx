@@ -744,302 +744,163 @@ export function ParentMessages() {
 // ── BILLING ──
 export function ParentBilling() {
   const { user, profile } = useAuth()
-  const [bills,       setBills]       = useState([])
-  const [loading,     setLoading]     = useState(true)
-  const [payModal,    setPayModal]    = useState(null) // bill to pay
-  const [printing,    setPrinting]    = useState(false)
-  const [receipt,     setReceipt]     = useState(null) // bill to show receipt for
-  const [filterStatus,setFilterStatus]= useState('all')
-  const { child } = useChildData()
-  const { children, switchChild } = { children:[], switchChild:()=>{} }
+  const [entries,  setEntries]  = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [paying,   setPaying]   = useState(false)
+  const [success,  setSuccess]  = useState(false)
+  const [tab,      setTab]      = useState('all')
 
   useEffect(() => {
     if (!user) return
-    supabase.from('billing').select('*').eq('parent_id', user.id).order('due_date', { ascending: false })
-      .then(({ data }) => { setBills(data||[]); setLoading(false) })
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('ledger_paid') === '1') setSuccess(true)
+    loadEntries()
   }, [user])
 
-  const totalBilled = bills.reduce((a,b) => a + Number(b.amount||0), 0)
-  const totalPaid   = bills.filter(b=>b.status==='paid').reduce((a,b) => a + Number(b.amount||0), 0)
-  const balanceDue  = bills.filter(b=>b.status!=='paid').reduce((a,b) => a + Number(b.amount||0), 0)
-  const overdue     = bills.filter(b=>b.status==='overdue').reduce((a,b) => a + Number(b.amount||0), 0)
+  async function loadEntries() {
+    setLoading(true)
+    const { data } = await supabase
+      .from('parent_ledger')
+      .select('*')
+      .eq('parent_id', user.id)
+      .order('created_at', { ascending: false })
+    setEntries(data || [])
+    setLoading(false)
+  }
 
-  function handlePrint() {
-    setPrinting(true)
-    setTimeout(() => { window.print(); setPrinting(false) }, 300)
+  const all      = entries
+  const charges  = entries.filter(e => e.type === 'debit')
+  const payments = entries.filter(e => e.type === 'credit')
+  const balance  = entries.reduce((acc, e) =>
+    acc + (e.type === 'debit' ? Number(e.amount) : -Number(e.amount)), 0)
+
+  const displayed = tab === 'all' ? all : tab === 'charges' ? charges : payments
+
+  const CAT_ICON = { tuition:'🏫', fee:'📋', activity:'🎭', field_trip:'🚌', supply:'📦', payment:'✅', other:'📝' }
+
+  async function payBalance() {
+    if (balance <= 0) return
+    setPaying(true)
+    try {
+      const res = await fetch('/.netlify/functions/pay-balance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parentId:    user.id,
+          parentEmail: profile?.email || user.email,
+          parentName:  profile?.full_name || 'Parent',
+          amount:      balance,
+          successUrl:  window.location.origin + '/parent/billing',
+          cancelUrl:   window.location.origin + '/parent/billing',
+        }),
+      })
+      const { url } = await res.json()
+      if (url) window.location.href = url
+    } catch (e) {
+      alert('Payment is not available right now. Please contact the school.')
+    }
+    setPaying(false)
   }
 
   return (
     <div>
-      {/* Print statement */}
-      <div className="print-only">
-        <div style={{fontFamily:'Arial,sans-serif',maxWidth:700,margin:'0 auto',padding:40}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:30,borderBottom:'3px solid #1a1a2e',paddingBottom:20}}>
-            <div>
-              <div style={{fontSize:24,fontWeight:900,color:'#1a1a2e'}}>BLE Worldwide</div>
-              <div style={{fontSize:12,color:'#666',marginTop:4}}>Billing Statement</div>
-            </div>
-            <div style={{textAlign:'right',fontSize:12,color:'#666'}}>
-              <div>Date: {new Date().toLocaleDateString()}</div>
-            </div>
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:30}}>
-            <div>
-              <div style={{fontSize:11,color:'#999',fontWeight:700,textTransform:'uppercase',marginBottom:6}}>Billed To</div>
-              <div style={{fontWeight:700,fontSize:15}}>{profile?.full_name}</div>
-              <div style={{fontSize:12,color:'#666'}}>{user?.email}</div>
-              {child&&<div style={{fontSize:12,color:'#666',marginTop:4}}>Student: {child.full_name} · {child.grade_level} Grade</div>}
-            </div>
-            <div style={{textAlign:'right'}}>
-              <div style={{fontSize:11,color:'#999',fontWeight:700,textTransform:'uppercase',marginBottom:6}}>Summary</div>
-              <div style={{fontSize:13}}>Total Billed: <strong>${totalBilled.toFixed(2)}</strong></div>
-              <div style={{fontSize:13,color:'#00804a'}}>Paid: <strong>${totalPaid.toFixed(2)}</strong></div>
-              <div style={{fontSize:13,color:'#cc3333'}}>Balance Due: <strong>${balanceDue.toFixed(2)}</strong></div>
-            </div>
-          </div>
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-            <thead>
-              <tr style={{background:'#1a1a2e',color:'white'}}>
-                <th style={{padding:'8px 12px',textAlign:'left'}}>Description</th>
-                <th style={{padding:'8px 12px',textAlign:'left'}}>Due Date</th>
-                <th style={{padding:'8px 12px',textAlign:'right'}}>Amount</th>
-                <th style={{padding:'8px 12px',textAlign:'center'}}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bills.map((b,i)=>(
-                <tr key={b.id} style={{background:i%2===0?'white':'#f9f9f9',borderBottom:'1px solid #eee'}}>
-                  <td style={{padding:'8px 12px'}}>{b.description}</td>
-                  <td style={{padding:'8px 12px'}}>{b.due_date||'—'}</td>
-                  <td style={{padding:'8px 12px',textAlign:'right',fontWeight:700}}>${Number(b.amount||0).toFixed(2)}</td>
-                  <td style={{padding:'8px 12px',textAlign:'center'}}>
-                    <span style={{padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:700,
-                      background:b.status==='paid'?'#e6fff4':b.status==='overdue'?'#fff0f0':'#fff9e6',
-                      color:b.status==='paid'?'#00804a':b.status==='overdue'?'#cc3333':'#b07800'}}>{b.status}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div style={{marginTop:40,borderTop:'1px solid #eee',paddingTop:16,fontSize:11,color:'#999',textAlign:'center'}}>
-            BLE Worldwide · Thank you for your payment
-          </div>
+      <div className="page-header fade-up">
+        <div>
+          <h2>💳 My Account</h2>
+          <div style={{fontSize:13,color:'var(--muted)'}}>Your full billing history and current balance</div>
         </div>
       </div>
 
-      {/* Screen UI */}
-      <div className="no-print">
-        <div className="page-header fade-up">
-          <h2>Billing & Payments</h2>
-          <button className="btn btn-outline" onClick={handlePrint}>🖨 Print Statement</button>
+      {success && (
+        <div style={{background:'rgba(0,201,177,.1)',border:'1px solid var(--teal)',borderRadius:10,padding:'12px 16px',marginBottom:16,color:'var(--teal)',fontWeight:700,fontSize:13}}>
+          &#x2705; Payment received! Your account has been updated.
         </div>
+      )}
 
-        <div className="grid-4 fade-up-2" style={{marginBottom:16}}>
-          <div className="stat-card sc-teal"><div className="stat-icon">💰</div><div className="stat-value">${totalBilled.toFixed(2)}</div><div className="stat-label">Total Billed</div></div>
-          <div className="stat-card sc-green"><div className="stat-icon">✅</div><div className="stat-value">${totalPaid.toFixed(2)}</div><div className="stat-label">Paid</div></div>
-          <div className="stat-card sc-gold"><div className="stat-icon">⏳</div><div className="stat-value">${balanceDue.toFixed(2)}</div><div className="stat-label">Balance Due</div></div>
-          <div className="stat-card sc-coral"><div className="stat-icon">🚨</div><div className="stat-value">${overdue.toFixed(2)}</div><div className="stat-label">Overdue</div></div>
-        </div>
+      <div className="fade-up-2">
+        <div className="card" style={{marginBottom:16,borderTop:'3px solid '+(balance>0?'#cc3333':'var(--teal)')}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:'var(--muted)',textTransform:'uppercase',letterSpacing:1,marginBottom:4}}>Current Balance</div>
+              <div style={{fontSize:36,fontWeight:900,color:balance>0?'#cc3333':balance<0?'var(--teal)':'var(--muted)',lineHeight:1}}>
+                ${Math.abs(balance).toFixed(2)}
+              </div>
+              <div style={{fontSize:12,color:'var(--muted)',marginTop:4}}>
+                {balance > 0 ? 'Outstanding — please pay at your earliest convenience'
+                  : balance < 0 ? 'Credit on your account'
+                  : 'All paid up!'}
+              </div>
+            </div>
+            {balance > 0 && (
+              <button className="btn btn-primary" style={{fontSize:14,padding:'12px 24px'}} onClick={payBalance} disabled={paying}>
+                {paying ? 'Redirecting...' : 'Pay $' + balance.toFixed(2) + ' Now'}
+              </button>
+            )}
+          </div>
 
-        {/* Unpaid invoices — pay now */}
-        {bills.filter(b=>b.status!=='paid').length > 0 && (
-          <div className="card fade-up-3" style={{marginBottom:16,border:'2px solid #ffc845'}}>
-            <div className="card-header"><div className="card-title">⏳ Outstanding Invoices</div></div>
-            {bills.filter(b=>b.status!=='paid').map(b=>(
-              <div key={b.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
-                <div style={{flex:1}}>
-                  <div style={{fontWeight:700,fontSize:13}}>{b.description}</div>
-                  <div style={{fontSize:11,color:'var(--muted)'}}>Due: {b.due_date||'—'}{b.is_recurring?` · 🔄 ${b.recurrence_interval}`:''}</div>
-                </div>
-                <div style={{fontWeight:800,fontSize:15,color:b.status==='overdue'?'var(--coral)':'var(--text)'}}>${Number(b.amount||0).toFixed(2)}</div>
-                <span className={`badge ${b.status==='overdue'?'badge-red':'badge-gold'}`}>{b.status}</span>
-                <button className="btn btn-primary btn-sm" onClick={()=>setPayModal(b)}>Pay Now</button>
+          <div style={{display:'flex',gap:24,marginTop:16,paddingTop:16,borderTop:'1px solid var(--border)',flexWrap:'wrap'}}>
+            {[
+              { label:'Total Charged', val: charges.reduce((a,e)=>a+Number(e.amount),0), color:'#cc3333' },
+              { label:'Total Paid',    val: payments.reduce((a,e)=>a+Number(e.amount),0), color:'var(--teal)' },
+              { label:'Transactions',  val: entries.length, color:'var(--muted)', noSign: true },
+            ].map(s => (
+              <div key={s.label}>
+                <div style={{fontSize:11,color:'var(--muted)',fontWeight:700,textTransform:'uppercase',letterSpacing:1}}>{s.label}</div>
+                <div style={{fontSize:20,fontWeight:900,color:s.color}}>{s.noSign ? s.val : '$'+s.val.toFixed(2)}</div>
               </div>
             ))}
           </div>
-        )}
+        </div>
 
-        {/* Full history */}
-        <div className="card fade-up-4">
-          <div className="card-header"><div className="card-title">Payment History</div></div>
-          {loading ? <div style={{textAlign:'center',padding:20}}><div className="spinner"/></div>
-          : bills.length===0 ? <div className="empty-state"><div className="es-icon">💳</div><div className="es-text">No billing records yet.</div></div>
-          : (
-            <table className="data-table">
-              <thead><tr><th>Description</th><th>Amount</th><th>Due Date</th><th>Status</th><th>Paid On</th></tr></thead>
-              <tbody>
-                {bills.map(b=>(
-                  <tr key={b.id}>
-                    <td>{b.description}{b.is_recurring&&<span style={{fontSize:10,color:'var(--violet)',marginLeft:6}}>🔄</span>}</td>
-                    <td style={{fontWeight:700}}>${Number(b.amount||0).toFixed(2)}</td>
-                    <td>{b.due_date||'—'}</td>
-                    <td><span className={`badge ${b.status==='paid'?'badge-green':b.status==='overdue'?'badge-red':'badge-gold'}`}>{b.status}</span></td>
-                    <td style={{fontSize:11,color:'var(--muted)'}}>{b.paid_at?new Date(b.paid_at).toLocaleDateString():'—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+        <div className="card" style={{padding:0,overflow:'hidden'}}>
+          <div style={{display:'flex',gap:4,padding:'10px 12px',borderBottom:'1px solid var(--border)',background:'var(--bg)'}}>
+            {[['all','All Transactions'],['charges','Charges'],['payments','Payments']].map(([k,l]) => (
+              <button key={k} onClick={()=>setTab(k)} style={{padding:'5px 14px',border:'none',borderRadius:20,cursor:'pointer',fontWeight:700,fontSize:11,background:tab===k?'var(--teal)':'transparent',color:tab===k?'white':'var(--muted)'}}>{l}</button>
+            ))}
+          </div>
+
+          {loading
+            ? <div style={{textAlign:'center',padding:40}}><div className="spinner"/></div>
+            : displayed.length === 0
+              ? <div className="empty-state" style={{padding:40}}><div className="es-icon">📋</div><div className="es-text">No transactions yet</div></div>
+              : (
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                  <thead>
+                    <tr style={{background:'var(--bg)',borderBottom:'2px solid var(--border)'}}>
+                      {['Date','Description','Amount','Balance'].map(h=>(
+                        <th key={h} style={{padding:'9px 14px',textAlign:'left',fontWeight:700,fontSize:11,color:'var(--muted)',textTransform:'uppercase'}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayed.map(e => (
+                      <tr key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
+                        <td style={{padding:'11px 14px',color:'var(--muted)',fontSize:12,whiteSpace:'nowrap'}}>
+                          {new Date(e.created_at).toLocaleDateString()}
+                        </td>
+                        <td style={{padding:'11px 14px'}}>
+                          <div style={{fontWeight:600}}>{CAT_ICON[e.category]||'📋'} {e.description}</div>
+                          {e.due_date && <div style={{fontSize:11,color:'var(--muted)'}}>Due: {e.due_date}</div>}
+                        </td>
+                        <td style={{padding:'11px 14px',fontWeight:800,color:e.type==='debit'?'#cc3333':'var(--teal)'}}>
+                          {e.type==='debit'?'+':'-'}${Number(e.amount).toFixed(2)}
+                        </td>
+                        <td style={{padding:'11px 14px',fontWeight:700,color:'var(--muted)',fontSize:12}}>
+                          ${Number(e.balance_after||0).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
+          }
         </div>
       </div>
-
-      {payModal && (
-        <PaymentModal
-          bill={payModal}
-          parentEmail={user?.email}
-          parentName={profile?.full_name}
-          onClose={()=>setPayModal(null)}
-          onPaid={()=>{
-            setPayModal(null)
-            supabase.from('billing').select('*').eq('parent_id', user.id).order('due_date', { ascending: false })
-              .then(({ data }) => setBills(data||[]))
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-function PaymentModal({ bill, parentEmail, parentName, onClose, onPaid }) {
-  const [loading,   setLoading]   = useState(false)
-  const [error,     setError]     = useState('')
-  const [method,    setMethod]    = useState('stripe')
-
-  async function handleStripe() {
-    setLoading(true); setError('')
-    try {
-      const res = await fetch('/.netlify/functions/create-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          billId:      bill.id,
-          amount:      bill.amount,
-          description: bill.description,
-          parentEmail,
-          parentName,
-          successUrl:  window.location.origin + '/parent/billing',
-          cancelUrl:   window.location.href,
-        })
-      })
-      const data = await res.json()
-      if (data.url) {
-        window.location.href = data.url
-      } else {
-        setError(data.error || 'Could not start checkout. Please try another method.')
-        setLoading(false)
-      }
-    } catch {
-      setError('Network error. Please try again.')
-      setLoading(false)
-    }
-  }
-
-  // Format card number
-  function fmtCard(v) { return v.replace(/\D/g,'').slice(0,16).replace(/(.{4})/g,'$1 ').trim() }
-  function fmtExpiry(v) { return v.replace(/\D/g,'').slice(0,4).replace(/^(\d{2})(\d)/,'$1/$2') }
-  const [cardNum,setCardNum]=useState(''); const [expiry,setExpiry]=useState(''); const [cvv,setCvv]=useState('')
-  const [nameOnCard,setNameOnCard]=useState(parentName||''); const [processing,setProcessing]=useState(false); const [success,setSuccess]=useState(false)
-  async function handleManualPay() {
-    setProcessing(true)
-    await new Promise(r=>setTimeout(r,2000))
-    await supabase.from('billing').update({ status:'paid', paid_at: new Date().toISOString() }).eq('id', bill.id)
-    setProcessing(false); setSuccess(true)
-    setTimeout(onPaid, 2000)
-  }
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:460}}>
-        {success ? (
-          <div style={{textAlign:'center',padding:40}}>
-            <div style={{fontSize:60,marginBottom:16}}>✅</div>
-            <div style={{fontFamily:'Nunito,sans-serif',fontWeight:900,fontSize:20,color:'var(--teal)',marginBottom:8}}>Payment Successful!</div>
-            <div style={{fontSize:13,color:'var(--muted)'}}>Your payment of <strong>${Number(bill.amount||0).toFixed(2)}</strong> has been received.</div>
-          </div>
-        ) : (
-          <>
-            <div className="modal-header">
-              <div className="modal-title">💳 Make a Payment</div>
-              <button className="modal-close" onClick={onClose}>✕</button>
-            </div>
-
-            <div style={{background:'var(--bg)',borderRadius:10,padding:'12px 14px',marginBottom:16}}>
-              <div style={{fontSize:12,color:'var(--muted)',marginBottom:2}}>{bill.description}</div>
-              <div style={{fontWeight:900,fontSize:24,color:'var(--text)'}}>
-                ${Number(bill.amount||0).toFixed(2)}
-                {bill.due_date&&<span style={{fontSize:12,color:'var(--muted)',fontWeight:400,marginLeft:8}}>Due {bill.due_date}</span>}
-              </div>
-            </div>
-
-            {error && <div style={{padding:'8px 12px',background:'#fff0f0',borderRadius:8,color:'#cc3333',fontSize:12,marginBottom:12,fontWeight:600}}>{error}</div>}
-
-            {/* Method tabs */}
-            <div style={{display:'flex',gap:0,marginBottom:16,border:'1px solid var(--border)',borderRadius:10,overflow:'hidden'}}>
-              {[['stripe','💳 Secure Card'],['bank','🏦 Bank Transfer'],['other','📱 Zelle/PayPal']].map(([k,l])=>(
-                <button key={k} onClick={()=>setMethod(k)} style={{flex:1,padding:'8px 0',border:'none',background:method===k?'var(--teal)':'white',color:method===k?'white':'var(--muted)',fontWeight:method===k?700:400,cursor:'pointer',fontSize:11,transition:'all .15s'}}>{l}</button>
-              ))}
-            </div>
-
-            {method==='stripe' && (
-              <div style={{textAlign:'center',padding:'8px 0 16px'}}>
-                <div style={{fontSize:12,color:'var(--muted)',marginBottom:16,lineHeight:1.6}}>
-                  You'll be redirected to Stripe's secure checkout page. Your card details are never stored on our servers.
-                </div>
-                <div style={{display:'flex',gap:8,justifyContent:'center',marginBottom:16}}>
-                  {['visa','mastercard','amex','discover'].map(c=>(
-                    <div key={c} style={{padding:'3px 8px',border:'1px solid var(--border)',borderRadius:4,fontSize:10,fontWeight:700,color:'var(--muted)',background:'white'}}>{c.toUpperCase()}</div>
-                  ))}
-                </div>
-                <button className="btn btn-primary" onClick={handleStripe} disabled={loading} style={{width:'100%',padding:'12px',fontSize:15}}>
-                  {loading ? <span style={{display:'flex',alignItems:'center',gap:8,justifyContent:'center'}}><div className="spinner" style={{width:14,height:14,borderWidth:2}}/>Redirecting to Stripe…</span>
-                    : `🔒 Pay $${Number(bill.amount||0).toFixed(2)} Securely`}
-                </button>
-                <div style={{fontSize:10,color:'var(--muted)',marginTop:8}}>Secured by Stripe · 256-bit SSL</div>
-              </div>
-            )}
-
-            {method==='bank' && (
-              <div style={{background:'#f0f7ff',borderRadius:10,padding:16,fontSize:13}}>
-                <div style={{fontWeight:700,marginBottom:10}}>Bank Transfer Details</div>
-                <div style={{display:'flex',flexDirection:'column',gap:6,fontSize:12}}>
-                  <div><span style={{color:'var(--muted)',width:100,display:'inline-block'}}>Bank:</span> <strong>First National Bank</strong></div>
-                  <div><span style={{color:'var(--muted)',width:100,display:'inline-block'}}>Account:</span> <strong>BLE Worldwide</strong></div>
-                  <div><span style={{color:'var(--muted)',width:100,display:'inline-block'}}>Routing:</span> <strong>021000021</strong></div>
-                  <div><span style={{color:'var(--muted)',width:100,display:'inline-block'}}>Account #:</span> <strong>4567890123</strong></div>
-                  <div><span style={{color:'var(--muted)',width:100,display:'inline-block'}}>Reference:</span> <strong>{bill.id?.slice(0,8).toUpperCase()}</strong></div>
-                </div>
-                <button className="btn btn-primary" onClick={handleManualPay} disabled={processing} style={{marginTop:16,width:'100%'}}>
-                  {processing?'Confirming…':'✓ Confirm Transfer Sent'}
-                </button>
-              </div>
-            )}
-
-            {method==='other' && (
-              <div style={{background:'#f0f7ff',borderRadius:10,padding:16,fontSize:13,textAlign:'center'}}>
-                <div style={{fontSize:32,marginBottom:8}}>📱</div>
-                <div style={{fontWeight:700,marginBottom:6}}>Pay via Zelle or PayPal</div>
-                <div style={{fontSize:12,color:'var(--muted)'}}>Send payment to: <strong>bleworldwide29@gmail.com</strong></div>
-                <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Reference: <strong>{bill.id?.slice(0,8).toUpperCase()}</strong></div>
-                <button className="btn btn-primary" onClick={handleManualPay} disabled={processing} style={{marginTop:16,width:'100%'}}>
-                  {processing?'Confirming…':'✓ Mark as Sent'}
-                </button>
-              </div>
-            )}
-
-            {method!=='stripe' && (
-              <div style={{display:'flex',justifyContent:'flex-end',marginTop:8}}>
-                <button className="btn btn-outline" onClick={onClose}>Cancel</button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
     </div>
   )
 }
 
 
-// ── SETTINGS / PASSWORD CHANGE ──
 export function ParentSettings() {
   const { user } = useAuth()
   const [current,   setCurrent]   = useState('')

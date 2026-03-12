@@ -12,6 +12,7 @@ const ROLE_CONFIG = {
         { to: '/admin/grades',        icon: '📊', label: 'Grade Book' },
         { to: '/admin/messages',      icon: '💬', label: 'Messages', badge: true },
         { to: '/admin/billing',       icon: '💳', label: 'Billing' },
+        { to: '/admin/ledger',        icon: '📒', label: 'Parent Ledger' },
       ]},
       { section: 'Management', items: [
         { to: '/admin/staff',         icon: '👨‍💼', label: 'Staff' },
@@ -46,6 +47,7 @@ const ROLE_CONFIG = {
         { to: '/admin/grades',        icon: '📊', label: 'Grade Book' },
         { to: '/admin/messages',      icon: '💬', label: 'Messages', badge: true },
         { to: '/admin/billing',       icon: '💳', label: 'Billing' },
+        { to: '/admin/ledger',        icon: '📒', label: 'Parent Ledger' },
       ]},
       { section: 'Management', items: [
         { to: '/admin/staff',         icon: '👨‍💼', label: 'Staff' },
