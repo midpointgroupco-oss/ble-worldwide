@@ -5,23 +5,21 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
   }
 
-  const supabaseUrl    = process.env.VITE_SUPABASE_URL
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const siteUrl        = process.env.SITE_URL || 'https://aquamarine-kitsune-dc3d0c.netlify.app'
+  const supabase = createClient(
+    process.env.VITE_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  )
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false }
-  })
+  const siteUrl = process.env.SITE_URL || 'https://bleworldwide.netlify.app'
 
   let body
   try { body = JSON.parse(event.body) }
   catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid request body' }) } }
 
   const { student_name, student_grade, guardian_name, guardian_email, school_message,
-          // legacy field names (keep for backwards compat)
           parentEmail, parentName, studentName, studentId } = body
 
-  // Normalize — accept either naming convention
   const _guardian_email = guardian_email || parentEmail
   const _guardian_name  = guardian_name  || parentName
   const _student_name   = student_name   || studentName
@@ -33,7 +31,7 @@ exports.handler = async (event) => {
   try {
     const tempPassword = 'BLE-' + Math.random().toString(36).slice(2, 8).toUpperCase()
 
-    // Create parent account in Supabase
+    // Try to create the user
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email:         _guardian_email,
       password:      tempPassword,
@@ -41,34 +39,52 @@ exports.handler = async (event) => {
       user_metadata: { full_name: _guardian_name || 'Parent/Guardian', role: 'parent' }
     })
 
-    if (authError && !authError.message.includes('already been registered')) {
+    let userId = authData?.user?.id
+
+    // If already exists — look them up and update their password
+    if (authError && authError.message.includes('already been registered')) {
+      const { data: listData } = await supabase.auth.admin.listUsers()
+      const existing = listData?.users?.find(u => u.email === _guardian_email)
+      if (existing) {
+        userId = existing.id
+        await supabase.auth.admin.updateUserById(userId, {
+          password:      tempPassword,
+          email_confirm: true,
+        })
+      }
+    } else if (authError) {
       throw authError
     }
 
-    if (authData?.user) {
-      await supabase.from('profiles').update({
-        full_name: guardian_name || 'Parent/Guardian',
+    // Always upsert profile so role is set correctly
+    if (userId) {
+      await supabase.from('profiles').upsert({
+        id:        userId,
+        full_name: _guardian_name || 'Parent/Guardian',
         role:      'parent',
-        email:     guardian_email
-      }).eq('id', authData.user.id)
-    // Link student if id provided
-    if ((studentId || newStudent?.id) && authData?.user) {
-      const sid = studentId
-      if (sid) await supabase.from('students').update({ guardian_auth_id: authData.user.id }).eq('id', sid).catch(()=>{})
-    }
+        email:     _guardian_email,
+      }, { onConflict: 'id' })
+
+      if (studentId) {
+        await supabase.from('students')
+          .update({ guardian_auth_id: userId })
+          .eq('id', studentId)
+          .catch(() => {})
+      }
     }
 
     // Send email via SendGrid
     let emailSent  = false
     let emailError = null
     const sendgridKey = process.env.SENDGRID_API_KEY
+
     if (sendgridKey) {
       try {
         const emailRes = await fetch('https://api.sendgrid.com/v3/mail/send', {
           method:  'POST',
           headers: {
             'Authorization': `Bearer ${sendgridKey}`,
-            'Content-Type':  'application/json'
+            'Content-Type':  'application/json',
           },
           body: JSON.stringify({
             personalizations: [{ to: [{ email: _guardian_email }] }],
@@ -81,15 +97,13 @@ exports.handler = async (event) => {
               guardian_email: _guardian_email,
               temp_password:  tempPassword,
               login_url:      `${siteUrl}/login`,
-              school_message: school_message || 'Welcome to BLE Worldwide! We are excited to have your child as part of our global learning community.'
-            })}]
-          })
+              school_message: school_message || 'Welcome to BLE Worldwide! We are excited to have your child as part of our global learning community.',
+            })}],
+          }),
         })
-        if (emailRes.ok || emailRes.status === 202) {
-          emailSent  = true
-          emailError = null
-        } else {
-          const errData  = await emailRes.json().catch(() => ({}))
+        emailSent  = emailRes.ok || emailRes.status === 202
+        if (!emailSent) {
+          const errData = await emailRes.json().catch(() => ({}))
           emailError = JSON.stringify(errData)
         }
       } catch (e) {
@@ -106,8 +120,8 @@ exports.handler = async (event) => {
         temp_password: tempPassword,
         email_sent:    emailSent,
         email_error:   emailError,
-        message:       `Parent account created for ${_guardian_email}`
-      })
+        message:       `Parent account ready for ${_guardian_email}`,
+      }),
     }
 
   } catch (err) {
@@ -144,7 +158,7 @@ function buildEmailHTML({ guardian_name, student_name, student_grade, guardian_e
 <body>
   <div class="container">
     <div class="header">
-      <span class="globe">🌐</span>
+      <span class="globe">&#x1F310;</span>
       <h1>BLE Worldwide</h1>
       <p>Global Homeschool Management Platform</p>
     </div>
@@ -157,15 +171,15 @@ function buildEmailHTML({ guardian_name, student_name, student_grade, guardian_e
         <div class="label" style="margin-top:10px">Grade Level</div>
         <div class="value">${student_grade} Grade</div>
       </div>
-      <p>Your parent portal account has been created. Use the credentials below to log in and track your child's progress, grades, schedule, and communicate with teachers.</p>
+      <p>Your parent portal account is ready. Use the credentials below to log in and track your child&#39;s progress.</p>
       <div class="creds">
         <div class="cred-row"><span class="cred-label">Email</span><span class="cred-value">${guardian_email}</span></div>
         <div class="cred-row"><span class="cred-label">Temporary Password</span><span class="cred-value">${temp_password}</span></div>
       </div>
-      <a href="${login_url}" class="btn">Access Parent Portal →</a>
-      <div class="warning">⚠️ Please change your password after your first login for security.</div>
+      <a href="${login_url}" class="btn">Access Parent Portal &#x2192;</a>
+      <div class="warning">&#x26A0; Please change your password after your first login.</div>
     </div>
-    <div class="footer">BLE Worldwide · Global Homeschool Platform<br/>If you have questions, contact your school administrator.</div>
+    <div class="footer">BLE Worldwide &middot; Global Homeschool Platform<br/>Contact your school administrator with any questions.</div>
   </div>
 </body>
 </html>`

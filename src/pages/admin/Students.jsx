@@ -75,6 +75,37 @@ export default function AdminStudents() {
     return acc
   }, {})
 
+  const [sendingLogin, setSendingLogin] = useState(null)
+  const [loginSent,    setLoginSent]    = useState(null)
+
+  async function sendStudentLogin(s) {
+    if (!s.email) { alert('This student has no email address on file. Edit the student and add an email first.'); return }
+    setSendingLogin(s.id)
+    try {
+      const res  = await fetch('/.netlify/functions/invite-student', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          student_name:  s.full_name,
+          student_email: s.email,
+          grade_level:   s.grade_level,
+          student_id:    s.id,
+        })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setLoginSent(s.id)
+        setTimeout(() => setLoginSent(null), 4000)
+      } else {
+        alert('Error sending login: ' + (data.error || 'Unknown error'))
+      }
+    } catch (e) {
+      alert('Failed to send login: ' + e.message)
+    } finally {
+      setSendingLogin(null)
+    }
+  }
+
   function toggleGrade(g) {
     setOpenGrades(p => ({ ...p, [g]: !p[g] }))
   }
@@ -156,6 +187,10 @@ export default function AdminStudents() {
                               style={{marginTop:8,width:'100%',background:'#e6f4ff',border:'1px solid #b0d4ff',borderRadius:8,padding:'5px 0',fontSize:11,color:'#0050b0',cursor:'pointer',fontWeight:700}}
                             >📚 Manage Courses</button>
                           )}
+                          <button
+                            onClick={e => { e.stopPropagation(); sendStudentLogin(s) }}
+                            style={{marginTop:6,width:'100%',background: loginSent===s.id ? '#e6fff9' : '#f0f4fb',border:'1px solid #c0cce0',borderRadius:8,padding:'5px 0',fontSize:11,color: loginSent===s.id ? '#0a5a3a' : '#333',cursor:'pointer',fontWeight:700}}
+                          >{sendingLogin===s.id ? 'Sending...' : loginSent===s.id ? '✓ Login Sent!' : '📧 Send Login'}</button>
                           {s.status === 'withdrawn'
                             ? <button onClick={e=>{ e.stopPropagation(); reEnrollStudent(s) }}
                                 style={{marginTop:8,width:'100%',background:'#e6fff4',border:'1px solid #b0eedd',borderRadius:8,padding:'5px 0',fontSize:11,color:'#00804a',cursor:'pointer',fontWeight:700}}>

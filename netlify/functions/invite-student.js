@@ -26,7 +26,7 @@ exports.handler = async (event) => {
   try {
     const tempPassword = 'BLE-' + Math.random().toString(36).slice(2, 8).toUpperCase()
 
-    // Create student auth account
+    // Try to create the student auth account
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email:         student_email,
       password:      tempPassword,
@@ -34,28 +34,42 @@ exports.handler = async (event) => {
       user_metadata: { full_name: student_name, role: 'student' }
     })
 
-    if (authError && !authError.message.includes('already been registered')) {
+    let userId = authData?.user?.id
+
+    // If already exists — look them up and reset their password
+    if (authError && authError.message.includes('already been registered')) {
+      const { data: listData } = await supabase.auth.admin.listUsers()
+      const existing = listData?.users?.find(u => u.email === student_email)
+      if (existing) {
+        userId = existing.id
+        await supabase.auth.admin.updateUserById(userId, {
+          password:      tempPassword,
+          email_confirm: true,
+        })
+      }
+    } else if (authError) {
       throw authError
     }
 
-    // Update profile role to student
-    if (authData?.user) {
-      await supabase.from('profiles').update({
+    // Always upsert profile with student role
+    if (userId) {
+      await supabase.from('profiles').upsert({
+        id:        userId,
         full_name: student_name,
         role:      'student',
         email:     student_email,
-      }).eq('id', authData.user.id)
+      }, { onConflict: 'id' })
 
       // Link auth user back to students table
       if (student_id) {
         await supabase.from('students')
-          .update({ auth_user_id: authData.user.id })
+          .update({ auth_user_id: userId })
           .eq('id', student_id)
           .catch(() => {})
       }
     }
 
-    // Send email via SendGrid
+    // Send credentials email via SendGrid
     let emailSent  = false
     let emailError = null
     const sendgridKey = process.env.SENDGRID_API_KEY
@@ -71,7 +85,7 @@ exports.handler = async (event) => {
           body: JSON.stringify({
             personalizations: [{ to: [{ email: student_email }] }],
             from:    { email: 'info@midpointcorp.com', name: 'BLE Worldwide' },
-            subject: `Your BLE Worldwide Student Portal Access`,
+            subject: 'Your BLE Worldwide Student Portal Access',
             content: [{ type: 'text/html', value: buildEmailHTML({
               student_name,
               student_email,
@@ -83,7 +97,7 @@ exports.handler = async (event) => {
         })
         emailSent  = emailRes.ok || emailRes.status === 202
         if (!emailSent) {
-          const errData  = await emailRes.json().catch(() => ({}))
+          const errData = await emailRes.json().catch(() => ({}))
           emailError = JSON.stringify(errData)
         }
       } catch (e) {
@@ -100,7 +114,7 @@ exports.handler = async (event) => {
         temp_password: tempPassword,
         email_sent:    emailSent,
         email_error:   emailError,
-        message:       `Student account created for ${student_email}`,
+        message:       `Student account ready for ${student_email}`,
       }),
     }
 
@@ -138,13 +152,13 @@ function buildEmailHTML({ student_name, student_email, grade_level, temp_passwor
 <body>
   <div class="container">
     <div class="header">
-      <span class="globe">🌐</span>
+      <span class="globe">&#x1F310;</span>
       <h1>BLE Worldwide</h1>
       <p>Global Homeschool Management Platform</p>
     </div>
     <div class="body">
       <h2>Welcome, ${student_name}!</h2>
-      <p>Your student portal account has been created. You can now log in to view your grades, assignments, schedule, announcements, and communicate with your teachers.</p>
+      <p>Your student portal account is ready. Log in to view your grades, assignments, schedule, and messages from your teachers.</p>
       <div class="info-card">
         <div class="label">Student</div>
         <div class="value">${student_name}</div>
@@ -155,10 +169,10 @@ function buildEmailHTML({ student_name, student_email, grade_level, temp_passwor
         <div class="cred-row"><span class="cred-label">Email</span><span class="cred-value">${student_email}</span></div>
         <div class="cred-row"><span class="cred-label">Temporary Password</span><span class="cred-value">${temp_password}</span></div>
       </div>
-      <a href="${login_url}" class="btn">Access Student Portal &rarr;</a>
-      <div class="warning">&#x26A0;&#xFE0F; Please change your password after your first login for security.</div>
+      <a href="${login_url}" class="btn">Access Student Portal &#x2192;</a>
+      <div class="warning">&#x26A0; Please change your password after your first login.</div>
     </div>
-    <div class="footer">BLE Worldwide &middot; Global Homeschool Platform<br/>If you have questions, contact your school administrator.</div>
+    <div class="footer">BLE Worldwide &middot; Global Homeschool Platform<br/>Contact your school administrator with any questions.</div>
   </div>
 </body>
 </html>`
