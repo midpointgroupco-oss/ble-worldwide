@@ -66,10 +66,11 @@ exports.handler = async (event) => {
       }, { onConflict: 'id' })
 
       if (studentId) {
-        await supabase.from('students')
-          .update({ guardian_auth_id: userId })
-          .eq('id', studentId)
-          .catch(() => {})
+        try {
+          await supabase.from('students')
+            .update({ guardian_auth_id: userId })
+            .eq('id', studentId)
+        } catch (_) {}
       }
     }
 

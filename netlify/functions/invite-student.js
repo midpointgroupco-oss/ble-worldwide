@@ -62,10 +62,11 @@ exports.handler = async (event) => {
 
       // Link auth user back to students table
       if (student_id) {
-        await supabase.from('students')
-          .update({ auth_user_id: userId })
-          .eq('id', student_id)
-          .catch(() => {})
+        try {
+          await supabase.from('students')
+            .update({ auth_user_id: userId })
+            .eq('id', student_id)
+        } catch (_) {}
       }
     }
 
