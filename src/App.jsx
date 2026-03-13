@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './lib/AuthContext'
 import LoginPage from './pages/LoginPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import LandingPage from './pages/LandingPage'
 import EnrollmentForm from './pages/EnrollmentForm'
 import AdminLayout from './components/layout/AdminLayout'
@@ -87,6 +88,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to={`/${profile?.role||'login'}`} replace/> : <LoginPage/>}/>
+      <Route path="/reset-password" element={<ResetPasswordPage/>}/>
       <Route path="/apply" element={<EnrollmentForm/>}/>
 
       <Route path="/admin" element={<ProtectedRoute allowedRole="admin"><AdminLayout/></ProtectedRoute>}>
